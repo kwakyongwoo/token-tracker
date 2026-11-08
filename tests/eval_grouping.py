@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""자동 분류 평가: fixture_prompts.tsv의 정답 작업과 haiku 분류 결과를 비교.
+"""Grouping eval: compare the classifier's work units with the answer key in fixture_prompts.tsv.
 
-실제 사용처럼 두 번에 나눠 분류한다 (s1~s4 먼저, 다음 날 s5를 캐시 위에 추가).
-결과: 콘솔 점수 + tests/grouping_result.html
-사용: python3 tests/eval_grouping.py
+Classifies in two passes like real use (s1-s4 first, then s5 the next day on top of the cache).
+Output: console scores + tests/grouping_result.html
+Usage: python3 tests/eval_grouping.py [runs=1]
 """
 import html
 import json
@@ -25,11 +25,11 @@ def load_fixture():
     turn = {}
     for i, (session, branch, task, prompt) in enumerate(lines):
         day = 8 if session != "s5" else 9
-        n = turn[session] = turn.get(session, 0) + 1  # 세션 안에서 턴이 쌓일수록 cache read 증가
+        n = turn[session] = turn.get(session, 0) + 1  # cache read grows as turns pile up in a session
         write = 30000 if n == 1 else 2000 + (i * 977) % 9000
         r = {"ts": "2026-11-%02dT%02d:%02d:00" % (day, 9 + i // 60, i % 60), "session": session,
              "branch": branch, "feature": "(none)", "purpose": prompt,
-             "model": "claude-sonnet-5-5" if session == "s3" else "claude-opus-5-5",  # 가짜 토큰, 실제 가격
+             "model": "claude-sonnet-5-5" if session == "s3" else "claude-opus-5-5",  # fake tokens, real prices
              "input_tokens": 3, "output_tokens": 200 + (i * 37) % 2500,
              "cache_creation_input_tokens": write, "cache_write_1h_tokens": write,
              "cache_read_input_tokens": 25000 + n * 12000 * (1 + i % 3)}
@@ -54,8 +54,8 @@ def pair_f1(pred, truth):
 def run_once(rows, truth):
     d = tempfile.mkdtemp()
     split = next(i for i, r in enumerate(rows) if r["session"] == "s5")
-    tracker.load_groups(d, rows[:split])       # 1일차 report
-    pred = tracker.load_groups(d, rows)         # 2일차 report: 새 프롬프트만 분류
+    tracker.load_groups(d, rows[:split])       # day-1 report
+    pred = tracker.load_groups(d, rows)         # day-2 report: classifies only the new prompts
 
     by_pred = OrderedDict()
     for r in rows:
@@ -74,27 +74,27 @@ def run_once(rows, truth):
 
 
 def main():
-    """사용: python3 tests/eval_grouping.py [실행 횟수=1]  (여러 번 돌려 분류 일관성 확인)"""
+    """Usage: python3 tests/eval_grouping.py [runs=1]  (several runs show how consistent the grouping is)"""
     runs = int(sys.argv[1]) if len(sys.argv) > 1 else 1
     rows, truth = load_fixture()
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(runs) as ex:
         results = list(ex.map(lambda _: run_once(rows, truth), range(runs)))
     for n, r in enumerate(results, 1):
-        print("[{}] 작업 {:>2}개 · 정확도 {:.0%} · precision {:.0%} recall {:.0%} F1 {:.0%}".format(
+        print("[{}] {:>2} work units · accuracy {:.0%} · precision {:.0%} recall {:.0%} F1 {:.0%}".format(
             n, len(r["by_pred"]), r["acc"], r["p"], r["rc"], r["f1"]))
     if runs > 1:
         avg = lambda k: sum(r[k] for r in results) / runs
-        print("평균: 작업 {:.1f}개 (정답 {}개) · 정확도 {:.0%} · recall {:.0%} · F1 {:.0%}".format(
+        print("Average: {:.1f} work units (answer key: {}) · accuracy {:.0%} · recall {:.0%} · F1 {:.0%}".format(
             sum(len(r["by_pred"]) for r in results) / runs, len(results[0]["by_truth"]),
             avg("acc"), avg("rc"), avg("f1")))
     r = results[-1]
-    print("\n마지막 실행의 정답 작업 → 분류:")
+    print("\nLast run, answer-key unit -> predicted units:")
     for t, c in r["by_truth"].items():
         print("  {:<14} → {}".format(t, ", ".join("{}({})".format(g, n) for g, n in c.items())))
     write_html(rows, truth, r["pred"], r["by_pred"], r["majority"], r["wrong"], r["by_truth"],
                r["acc"], r["p"], r["rc"], r["f1"])
-    print("\n결과 페이지: " + os.path.join(HERE, "grouping_result.html"))
+    print("\nResult page: " + os.path.join(HERE, "grouping_result.html"))
 
 
 def write_html(rows, truth, pred, by_pred, majority, wrong, by_truth, acc, p, rc, f1):
@@ -115,7 +115,7 @@ def write_html(rows, truth, pred, by_pred, majority, wrong, by_truth, acc, p, rc
                 s=r["session"], ts=r["ts"][5:16].replace("T", " "), p=e(r["purpose"]),
                 chip=chip(truth[tracker.row_key(r)]))
             for r in rs)
-        cards.append('<section class="card"><h3>{}</h3><div class="sub">프롬프트 {}개 · 토큰 {:,} · 다수 정답: {}</div>'
+        cards.append('<section class="card"><h3>{}</h3><div class="sub">{} prompts · {:,} tokens · majority answer: {}</div>'
                      '<ul>{}</ul></section>'.format(e(g), len(rs), tot, chip(majority[g]), items))
     trows = "".join("<tr><td>{}</td><td>{}</td></tr>".format(
         chip(t), " ".join('<span class="g">{} <b>{}</b></span>'.format(e(g), n) for g, n in c.items()))
@@ -124,8 +124,8 @@ def write_html(rows, truth, pred, by_pred, majority, wrong, by_truth, acc, p, rc
         e(r["purpose"]), color[truth[tracker.row_key(r)]], "x" if tracker.row_key(r) in wrong else "")
         for r in rows)
 
-    page = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>자동 분류 평가</title>
+    page = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Grouping Eval</title>
 <style>
 :root{{--bg:#f7f7f5;--fg:#1d1d1b;--mute:#6b6b66;--card:#fff;--line:#e4e4df;--bad:#fdecea}}
 @media (prefers-color-scheme:dark){{:root{{--bg:#161615;--fg:#ececea;--mute:#9a9a94;--card:#21211f;--line:#33332f;--bad:#3a2220}}}}
@@ -148,17 +148,17 @@ li.bad{{background:var(--bad)}} .mk{{width:14px;color:var(--mute)}} li.bad .mk{{
 table{{border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;width:100%}}
 td{{padding:6px 10px;border-top:1px solid var(--line)}} .g{{margin-right:10px}}
 </style></head><body><main>
-<h1>자동 작업 분류 평가</h1>
-<div class="sub">fixture_prompts.tsv · 1일차(s1~s4) 분류 후 2일차(s5)를 캐시 위에 추가 분류</div>
+<h1>Work-unit grouping eval</h1>
+<div class="sub">fixture_prompts.tsv · day 1 (s1-s4) classified first, then day 2 (s5) on top of the cache</div>
 <div class="stats">
-<div class="stat"><b>{acc:.0%}</b><span>정확도 (그룹 다수결 기준)</span></div>
-<div class="stat"><b>{f1:.0%}</b><span>쌍 F1 (precision {p:.0%} · recall {rc:.0%})</span></div>
-<div class="stat"><b>{n}</b><span>프롬프트</span></div>
-<div class="stat"><b>{nt} → {np}</b><span>정답 작업 → 분류된 작업</span></div>
+<div class="stat"><b>{acc:.0%}</b><span>Accuracy (by group majority)</span></div>
+<div class="stat"><b>{f1:.0%}</b><span>Pairwise F1 (precision {p:.0%} · recall {rc:.0%})</span></div>
+<div class="stat"><b>{n}</b><span>Prompts</span></div>
+<div class="stat"><b>{nt} → {np}</b><span>Answer-key units → predicted units</span></div>
 </div>
-<h2>시간순 타임라인 (색 = 정답 작업, 테두리 = 오분류)</h2><div class="tl">{timeline}</div>
-<h2>정답 작업이 어디로 갔나</h2><table>{trows}</table>
-<h2>분류된 작업별 프롬프트</h2><div class="grid">{cards}</div>
+<h2>Timeline (color = answer-key unit, outline = misclassified)</h2><div class="tl">{timeline}</div>
+<h2>Where each answer-key unit went</h2><table>{trows}</table>
+<h2>Prompts by predicted unit</h2><div class="grid">{cards}</div>
 </main></body></html>""".format(acc=acc, f1=f1, p=p, rc=rc, n=len(rows), nt=len(by_truth), np=len(by_pred),
                                 timeline=timeline, trows=trows, cards="".join(cards))
     with open(os.path.join(HERE, "grouping_result.html"), "w") as f:

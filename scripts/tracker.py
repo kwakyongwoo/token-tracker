@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""token-tracker: 프롬프트별 토큰 사용량 기록 + 기능 단위 합산.
+"""token-tracker: record token usage per prompt and total it per work unit.
 
-데이터: <project>/.claude/token-usage/
-  feature    현재 기능 이름 (한 줄)
-  log.jsonl  프롬프트 1개 = 1줄
+Data: <project>/.claude/token-usage/
+  log.jsonl    one line per prompt
+  groups.json  work-unit classification cache
+  feature      optional pinned work name (one line)
 """
 import json
 import os
@@ -17,9 +18,9 @@ from datetime import datetime
 KEYS = ("input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")
 LABELS = ("input", "output", "cache write", "cache read")
 
-# $/MTok: (input, output, cache read). cache write = input x1.25 (5분 TTL) / x2 (1시간 TTL).
-# 출처: claude-api 스킬 가격표 (2026-10-06 기준). 가격이 바뀌면 여기만 고치면 됨.
-# shortcut: Haiku 5.5의 100K 초과 프롬프트 할증, Batch 할인은 반영 안 함. 필요해지면 추가.
+# $/MTok: (input, output, cache read). cache write = input x1.25 (5-min TTL) / x2 (1-hour TTL).
+# Source: Anthropic API list prices as of 2026-10-06. Update here when prices change.
+# shortcut: ignores Haiku 5.5's >100K-prompt surcharge and Batch discounts; add if needed.
 PRICES = {
     "claude-fable-5-1": (10, 50, 0.25), "claude-mythos-5-1": (10, 50, 0.25),
     "claude-fable-5": (10, 50, 1.0), "claude-mythos-5": (10, 50, 1.0),
@@ -31,14 +32,14 @@ PRICES = {
 
 
 def price_for(model):
-    """모델 id에 맞는 가격 (가장 긴 prefix 매칭: 'claude-opus-5-5[1m]' → opus-5-5)."""
+    """Price for a model id, by longest prefix match ('claude-opus-5-5[1m]' -> opus-5-5)."""
     keys = [k for k in PRICES if (model or "").startswith(k)]
     return PRICES[max(keys, key=len)] if keys else None
 
 
 def cost_parts(row):
-    """프롬프트 1개(row)의 토큰 종류별 비용($) dict. 모델을 모르면 None.
-    shortcut: 한 턴 안에서 모델이 바뀌면 가장 많이 쓴 모델 가격으로 계산. 섞어 쓰는 일이 잦아지면 메시지별로 저장."""
+    """Cost ($) per token type for one prompt (row). None if the model is unknown.
+    shortcut: a turn that mixes models is priced at its most-used model; store per message if mixing becomes common."""
     p = price_for(row.get("model"))
     if p is None:
         return None
@@ -47,7 +48,7 @@ def cost_parts(row):
     parts = {"input": row["input_tokens"] * inp, "output": row["output_tokens"] * out,
              "cache write": (row["cache_creation_input_tokens"] - w1h) * inp * 1.25 + w1h * inp * 2,
              "cache read": row["cache_read_input_tokens"] * read}
-    mult = 2 if row.get("fast") else 1  # fast mode는 2배
+    mult = 2 if row.get("fast") else 1  # fast mode costs 2x
     return {k: v * mult / 1e6 for k, v in parts.items()}
 
 
@@ -55,9 +56,9 @@ def data_dir(cwd):
     d = os.path.join(cwd, ".claude", "token-usage")
     os.makedirs(d, exist_ok=True)
     gi = os.path.join(d, ".gitignore")
-    if not os.path.exists(gi):  # 프롬프트 내용이 프로젝트 git에 커밋되지 않게 폴더 전체 제외
+    if not os.path.exists(gi):  # keep prompt text out of the project's git
         with open(gi, "w") as f:
-            f.write("# token-tracker 기록 (프롬프트 내용 포함) - 커밋하지 않음\n*\n")
+            f.write("# token-tracker logs (contain prompt text) - do not commit\n*\n")
     return d
 
 
@@ -70,7 +71,7 @@ def current_feature(cwd):
 
 
 def is_prompt(entry):
-    """사람이 입력한 프롬프트인지 (tool_result 아님)."""
+    """True if the entry is a prompt typed by the user (not a tool_result)."""
     if entry.get("type") != "user" or entry.get("isMeta") or entry.get("isSidechain"):
         return False
     content = (entry.get("message") or {}).get("content")
@@ -85,7 +86,7 @@ def prompt_text(entry):
     content = entry["message"]["content"]
     if isinstance(content, list):
         content = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
-    # 슬래시 커맨드는 XML 태그로 기록됨 → "/name args" 로 축약
+    # slash commands are logged as XML tags -> shorten to "/name args"
     cmd = re.search(r"<command-name>(.*?)</command-name>", content)
     if cmd:
         args = re.search(r"<command-args>(.*?)</command-args>", content, re.S)
@@ -94,7 +95,7 @@ def prompt_text(entry):
 
 
 def last_turn_usage(lines):
-    """마지막 프롬프트와 그 이후 assistant 메시지들의 usage 합계를 반환."""
+    """Return the last prompt and the summed usage of the assistant messages after it."""
     entries = []
     for line in lines:
         try:
@@ -104,7 +105,7 @@ def last_turn_usage(lines):
     start = next((i for i in range(len(entries) - 1, -1, -1) if is_prompt(entries[i])), None)
     if start is None:
         return None, None, True, None
-    # 한 메시지가 content block마다 여러 줄로 기록되므로 message.id로 중복 제거
+    # one message is logged once per content block, so dedupe by message.id
     by_id = OrderedDict()
     last_stop = None
     for e in entries[start + 1:]:
@@ -134,11 +135,11 @@ def git_branch(cwd):
 
 
 def cmd_stop():
-    if os.environ.get("TOKEN_TRACKER_SKIP"):  # report가 띄운 분류용 claude 호출은 기록 안 함
+    if os.environ.get("TOKEN_TRACKER_SKIP"):  # skip the classifier calls that report itself makes
         return
     hook = json.load(sys.stdin)
     cwd = hook.get("cwd") or os.getcwd()
-    # Stop 훅이 마지막 응답이 transcript에 쓰이기 전에 실행될 수 있어서 최대 3초 재시도
+    # the Stop hook can fire before the last reply is flushed to the transcript, so retry for up to 3s
     for _ in range(15):
         try:
             with open(hook["transcript_path"]) as f:
@@ -172,48 +173,50 @@ def cmd_feature(name):
     elif name:
         with open(path, "w") as f:
             f.write(name.strip() + "\n")
-    print("현재 기능: " + current_feature(cwd) + "  ((none)이면 자동 분류)")
+    print("Current work: " + current_feature(cwd) + "  ((none) = automatic classification)")
 
 
 def row_key(r):
     return "{}|{}".format(r.get("session"), r["ts"])
 
 
-CLASSIFY_PROMPT = """아래는 개발자가 Claude Code에 입력한 프롬프트 기록(시간순)이다.
-각 프롬프트가 어떤 "작업"을 위한 것인지 이름을 붙여라.
+CLASSIFY_PROMPT = """Below is a developer's prompt history in Claude Code (chronological).
+Label each prompt with the "work unit" it belongs to.
 
-작업 단위 기준:
-- 작업 = 사용자가 체감하는 기능 하나 또는 버그 하나. 그 기능의 세부 단계(UI, 검증, 에러 처리,
-  테스트, 리팩터링, 후속 수정, 같은 기능의 확장)는 모두 같은 작업이다.
-  예: "로그인 폼" / "비밀번호 검증" / "로그아웃 버튼" / "소셜 로그인 추가" → 전부 하나의 로그인 작업.
-- 같은 버그가 다른 경로로 재발해서 다시 고치는 것도 원래 버그 작업이다.
-- 서로 다른 기능은 이름이 비슷해도 나눈다 (예: 결제 에러 수정 ≠ 결제 화면 디자인).
-- 다른 작업 중간에 끼어든 급한 작업은 따로 분류하고, "다시 X로 돌아와서"면 X 작업으로 돌아간다.
-- "ㅇㅇ", "계속", "응", "ㄱㄱ" 같은 짧은 프롬프트는 바로 앞 프롬프트와 같은 작업이다.
-- 같은 세션/브랜치이고 시간이 가까우면 같은 작업일 가능성이 높지만, 내용이 우선이다.
+What counts as one work unit:
+- A work unit = one user-facing feature or one bug. All steps of that feature (UI, validation,
+  error handling, tests, refactoring, follow-up fixes, extensions of the same feature) are the same unit.
+  e.g. "login form" / "password validation" / "logout button" / "add social login" -> one login unit.
+- Fixing the same bug again when it reappears via another path is still the original bug unit.
+- Different features stay separate even with similar names (e.g. payment error fix != payment page design).
+- An urgent task that interrupts other work is its own unit; "back to X" returns to unit X.
+- Short replies such as "ok", "yes", "continue", "go" belong to the same unit as the prompt right before.
+- Same session/branch and close in time suggests the same unit, but content wins.
 
-기존 작업 (이름과 예시 프롬프트):
+Existing work units (name and example prompts):
 {known}
 
-기존 작업에 해당하면 새 이름을 만들지 말고 기존 이름을 글자 하나 다르지 않게 그대로 써라.
-새 작업 이름은 한국어 2~5단어, 세부 단계가 아니라 기능 이름으로 (예: "로그인", "결제 500 에러").
+If a prompt belongs to an existing unit, reuse that name exactly, character for character.
+Name new units in 2-5 words, in the same language as the prompts, after the feature rather than a
+sub-step (e.g. "Login", "Checkout 500 error").
 
-분류할 프롬프트 (번호<TAB>시간<TAB>세션<TAB>브랜치<TAB>내용):
+Prompts to classify (number<TAB>time<TAB>session<TAB>branch<TAB>text):
 {lines}
 
-다른 말 없이 JSON 객체만 출력: {{"번호": "작업 이름", ...}}"""
+Output only a JSON object, nothing else: {{"number": "work unit name", ...}}"""
 
 
 def classify(rows, known):
-    """rows를 claude(기본 sonnet)로 작업 단위 분류. known = {기존 작업 이름: [예시 프롬프트]}. {row_key: 작업 이름} 반환."""
+    """Classify rows into work units with claude (sonnet by default).
+    known = {existing work name: [example prompts]}. Returns {row_key: work name}."""
     lines = "\n".join("{}\t{}\t{}\t{}\t{}".format(
         i, r["ts"], (r.get("session") or "")[:8], r.get("branch") or "-", r["purpose"])
         for i, r in enumerate(rows))
-    known_text = "\n".join("- {}: {}".format(g, " / ".join(ex)) for g, ex in known.items()) or "(없음)"
+    known_text = "\n".join("- {}: {}".format(g, " / ".join(ex)) for g, ex in known.items()) or "(none)"
     prompt = CLASSIFY_PROMPT.format(known=known_text, lines=lines)
     out = subprocess.run(
-        # sonnet: haiku보다 실행마다 결과가 일정함 (tests/eval_grouping.py 4회 기준 F1 92% 동일, 작업 수 편차 0).
-        # 기본 시스템 프롬프트/CLAUDE.md를 빼서 호출당 비용 약 1/10.
+        # sonnet: more consistent run-to-run than haiku (tests/eval_grouping.py, 4 runs: same F1 92%, same group count).
+        # dropping the default system prompt and CLAUDE.md cuts the cost per call ~10x.
         ["claude", "-p", "--model", os.environ.get("TOKEN_TRACKER_MODEL", "sonnet"), "--tools", "",
          "--no-session-persistence", "--setting-sources", "",
          "--system-prompt", "You group developer prompts into work units. Output only the requested JSON."],
@@ -221,13 +224,13 @@ def classify(rows, known):
         env=dict(os.environ, TOKEN_TRACKER_SKIP="1"))
     m = re.search(r"\{.*\}", out.stdout, re.S)
     if not m:
-        raise RuntimeError("분류 실패: " + (out.stderr or out.stdout)[:300])
+        raise RuntimeError("classification failed: " + (out.stderr or out.stdout)[:300])
     labels = json.loads(m.group(0))
     return {row_key(r): labels[str(i)] for i, r in enumerate(rows) if str(i) in labels}
 
 
 def load_groups(d, rows):
-    """수동 지정 > 캐시 > 새로 분류. 새로 분류한 결과는 groups.json에 캐시."""
+    """Pinned name > cache > new classification. New results are cached in groups.json."""
     path = os.path.join(d, "groups.json")
     try:
         with open(path) as f:
@@ -235,10 +238,10 @@ def load_groups(d, rows):
     except (OSError, ValueError):
         cache = {}
     todo = [r for r in rows if r.get("feature") in (None, "(none)") and row_key(r) not in cache]
-    # shortcut: 200개씩 끊어서 분류, 배치 경계에서는 앞 배치의 작업 이름 목록만 이어짐
+    # shortcut: classifies in batches of 200; across batches only the earlier work names carry over
     purpose = {row_key(r): r["purpose"] for r in rows}
     for i in range(0, len(todo), 200):
-        known = OrderedDict()  # 작업별 최근 예시 3개: 이름만 줄 때보다 기존 작업 재사용이 잘 됨
+        known = OrderedDict()  # 3 recent examples per work unit: reuses existing names better than names alone
         for k, g in cache.items():
             if k in purpose:
                 known.setdefault(g, []).append(purpose[k][:60])
@@ -247,7 +250,7 @@ def load_groups(d, rows):
         with open(path, "w") as f:
             json.dump(cache, f, ensure_ascii=False, indent=1)
     return {row_key(r): (r["feature"] if r.get("feature") not in (None, "(none)")
-                         else cache.get(row_key(r), "(미분류)")) for r in rows}
+                         else cache.get(row_key(r), "(unclassified)")) for r in rows}
 
 
 def load_rows(d):
@@ -263,7 +266,7 @@ def load_rows(d):
 
 
 def aggregate(rows):
-    """작업별 합계: 토큰 4종 + 종류별 비용. 모델을 몰라 비용 계산 못 한 프롬프트 수는 unknown."""
+    """Totals per work unit: 4 token types + cost per type. unknown = prompts with no known model (no cost)."""
     agg = OrderedDict()
     for r in rows:
         a = agg.setdefault(r["group"], dict(prompts=0, unknown=0, cost=0.0, total=0,
@@ -289,7 +292,7 @@ def usd(v):
 def cmd_report(only=None):
     rows = load_rows(data_dir(os.getcwd()))
     if not rows:
-        print("기록 없음.")
+        print("No records yet.")
         return
     if only:
         rows = [r for r in rows if r["group"] == only]
@@ -300,19 +303,19 @@ def cmd_report(only=None):
                 r["cache_creation_input_tokens"], r["cache_read_input_tokens"], r["purpose"][:60]))
         print()
     agg = OrderedDict(sorted(aggregate(rows).items(), key=lambda kv: -kv[1]["cost"]))
-    print("| 작업 | 프롬프트 | input | output | cache write | cache read | 비용 |")
+    print("| Work | Prompts | input | output | cache write | cache read | Cost |")
     print("|---|---:|---:|---:|---:|---:|---:|")
     for name, a in agg.items():
         print("| {} | {} | {:,} | {:,} | {:,} | {:,} | {}{} |".format(
             name, a["prompts"], a["input_tokens"], a["output_tokens"],
             a["cache_creation_input_tokens"], a["cache_read_input_tokens"], usd(a["cost"]),
-            " (+모델 미상 {}개)".format(a["unknown"]) if a["unknown"] else ""))
+            " (+{} with unknown model)".format(a["unknown"]) if a["unknown"] else ""))
 
 
 COLORS = dict(zip(LABELS, ("#8b5cf6", "#3b82f6", "#f59e0b", "#9ca3af")))
 
-HTML = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1"><title>토큰 사용 리포트</title>
+HTML = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Token Usage Report</title>
 <style>
 :root{--bg:#f7f7f5;--fg:#1d1d1b;--mute:#6b6b66;--card:#fff;--line:#e4e4df;--track:#ececE8}
 @media (prefers-color-scheme:dark){:root{--bg:#161615;--fg:#ececea;--mute:#9a9a94;--card:#21211f;--line:#33332f;--track:#2c2c29}}
@@ -341,13 +344,13 @@ th{color:var(--mute);font-weight:500;font-size:12px;white-space:nowrap}
 td.p{width:100%} td.sub{white-space:nowrap}
 @media (max-width:600px){.bar{grid-template-columns:1fr 90px}.bar .t{grid-column:1/-1;order:3}.hide-sm{display:none}}
 </style></head><body><main>
-<h1>토큰 사용 리포트</h1><div class="sub">{project} · {span} · 비용은 API 정가 기준 추정</div>
+<h1>Token Usage Report</h1><div class="sub">{project} · {span} · costs estimated at API list prices</div>
 <div class="stats">{stats}</div>
-<h2>비용 구성 (전체)</h2><div class="box">{mix}</div>
-<h2>작업별 비용</h2><div class="box">{bars}<div class="legend">{legend}</div></div>
-<h2>작업별 토큰 (종류별)</h2><div class="box"><table>{tokens}</table></div>
-<h2>시간순 (막대 높이 = 비용, 색 = 작업)</h2><div class="box tl">{timeline}</div>
-<h2>작업별 프롬프트</h2>{details}
+<h2>Cost breakdown (all)</h2><div class="box">{mix}</div>
+<h2>Cost by work unit</h2><div class="box">{bars}<div class="legend">{legend}</div></div>
+<h2>Tokens by work unit</h2><div class="box"><table>{tokens}</table></div>
+<h2>Timeline (bar height = cost, color = work unit)</h2><div class="box tl">{timeline}</div>
+<h2>Prompts by work unit</h2>{details}
 </main></body></html>"""
 
 
@@ -357,7 +360,7 @@ def cmd_html():
     d = data_dir(cwd)
     rows = load_rows(d)
     if not rows:
-        print("기록 없음.")
+        print("No records yet.")
         return
     e = html.escape
     agg = OrderedDict(sorted(aggregate(rows).items(), key=lambda kv: (-kv[1]["cost"], -kv[1]["total"])))
@@ -376,14 +379,14 @@ def cmd_html():
     def segs(a, base):
         return "".join('<i style="width:{};background:{}"></i>'.format(pct(a["$" + l], base), COLORS[l]) for l in LABELS)
 
-    stats = [("전체 비용", usd(grand)), ("프롬프트", len(rows)), ("작업", len(agg)),
-             ("프롬프트당 평균", usd(grand / max(len(rows) - unknown, 1))),
-             ("세션", len({r.get("session") for r in rows}))]
+    stats = [("Total cost", usd(grand)), ("Prompts", len(rows)), ("Work units", len(agg)),
+             ("Avg per prompt", usd(grand / max(len(rows) - unknown, 1))),
+             ("Sessions", len({r.get("session") for r in rows}))]
     if unknown:
-        stats.append(("모델 미상 (비용 제외)", unknown))
+        stats.append(("Unknown model (no cost)", unknown))
     stats = "".join('<div class="stat"><b>{}</b><span>{}</span></div>'.format(v, k) for k, v in stats)
     mix = ('<div class="t" style="height:22px">{}</div><table style="margin-top:10px">'
-           '<tr><th>종류</th><th class="num">토큰</th><th class="num">비용</th><th class="num">비중</th></tr>{}</table>').format(
+           '<tr><th>Type</th><th class="num">Tokens</th><th class="num">Cost</th><th class="num">Share</th></tr>{}</table>').format(
         segs({"$" + l: by_label[l] for l in LABELS}, grand),
         "".join('<tr><td><span class="dot" style="--c:{}"></span>{}</td><td class="num">{:,}</td>'
                 '<td class="num">{}</td><td class="num">{:.0f}%</td></tr>'.format(
@@ -396,9 +399,9 @@ def cmd_html():
             c=color[g], g=e(g), segs=segs(a, top), cost=usd(a["cost"]), share=100.0 * a["cost"] / (grand or 1),
             tip=" · ".join("{} {}".format(l, usd(a["$" + l])) for l in LABELS))
         for g, a in agg.items())
-    legend = "구성:" + "".join('<i style="background:{}"></i>{}'.format(COLORS[l], l) for l in LABELS)
-    tokens = ('<tr><th>작업</th><th class="num">프롬프트</th>' + "".join('<th class="num">{}</th>'.format(l) for l in LABELS)
-              + '<th class="num">비용</th></tr>' + "".join(
+    legend = "Breakdown:" + "".join('<i style="background:{}"></i>{}'.format(COLORS[l], l) for l in LABELS)
+    tokens = ('<tr><th>Work</th><th class="num">Prompts</th>' + "".join('<th class="num">{}</th>'.format(l) for l in LABELS)
+              + '<th class="num">Cost</th></tr>' + "".join(
                   '<tr><td><span class="dot" style="--c:{}"></span>{}</td><td class="num">{}</td>{}<td class="num">{}</td></tr>'.format(
                       color[g], e(g), a["prompts"], "".join('<td class="num">{:,}</td>'.format(a[k]) for k in KEYS), usd(a["cost"]))
                   for g, a in agg.items()))
@@ -415,9 +418,9 @@ def cmd_html():
             for r, c in zip(rows, costs) if r["group"] == g)
         details.append(
             '<details><summary><span class="dot" style="--c:{}"></span><h3>{}</h3>'
-            '<span class="sub">프롬프트 {}</span><b class="num">{}</b></summary>'
-            '<table><tr><th>시간</th><th>프롬프트</th><th class="num hide-sm">output</th>'
-            '<th class="num hide-sm">cache write</th><th class="num hide-sm">cache read</th><th class="num">비용</th></tr>{}</table></details>'.format(
+            '<span class="sub">{} prompts</span><b class="num">{}</b></summary>'
+            '<table><tr><th>Time</th><th>Prompt</th><th class="num hide-sm">output</th>'
+            '<th class="num hide-sm">cache write</th><th class="num hide-sm">cache read</th><th class="num">Cost</th></tr>{}</table></details>'.format(
                 color[g], e(g), a["prompts"], usd(a["cost"]), trs))
     page = HTML
     for k, v in (("{project}", e(os.path.basename(cwd))),

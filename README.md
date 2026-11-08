@@ -1,48 +1,59 @@
 # token-tracker
 
-Claude Code 플러그인. 프롬프트마다 토큰 사용량을 기록하고, Claude가 자동으로 **작업 단위**(기능·버그)로 묶어 작업별 토큰과 비용을 보여줍니다.
+**English** | [한국어](README.ko.md)
 
-리포트 예시: [tests/sample_report.html](tests/sample_report.html) (다운로드해서 브라우저로 열기)
+A Claude Code plugin that records token usage for every prompt, lets Claude group your prompts into **work units** (features and bugs) automatically, and shows tokens and cost per work unit.
 
-## 설치
+Sample report: [tests/sample_report.html](tests/sample_report.html) (download and open it in a browser)
+
+## Install
 
 ```
 /plugin marketplace add kwakyongwoo/token-tracker
 /plugin install token-tracker@token-tracker
 ```
 
-로컬에서 바로 써보기: `claude --plugin-dir /path/to/token-tracker`
+Try it locally without installing: `claude --plugin-dir /path/to/token-tracker`
 
-필요: `python3` (표준 라이브러리만 사용), `claude` CLI.
+Requires `python3` (standard library only) and the `claude` CLI.
 
-## 사용법
+### Update
 
-평소처럼 작업하면 기록은 자동입니다.
+Refresh the marketplace first, then update the plugin, then restart Claude Code:
 
-| 명령 | 하는 일 |
+```
+claude plugin marketplace update token-tracker
+claude plugin update token-tracker@token-tracker
+```
+
+## Usage
+
+Work as usual; recording is automatic.
+
+| Command | What it does |
 |---|---|
-| `/token-tracker:report` | 작업별 합계 표 (input / output / cache write / cache read / 비용) |
-| `/token-tracker:report <작업 이름>` | 그 작업의 프롬프트별 내역 |
-| `/token-tracker:report-html` | HTML 리포트 생성 후 브라우저로 열기 |
-| `/token-tracker:feature <이름>` | (선택) 자동 분류 대신 작업 이름 고정. `off`로 해제 |
+| `/token-tracker:report` | Table per work unit (input / output / cache write / cache read / cost) |
+| `/token-tracker:report <work name>` | Per-prompt breakdown of one work unit |
+| `/token-tracker:report-html` | Builds an HTML report and opens it in the browser |
+| `/token-tracker:feature <name>` | (Optional) Pin a work name instead of automatic grouping. `off` to unpin |
 
-## 동작 방식
+## How it works
 
-- **기록**: `Stop` 훅이 응답이 끝날 때 transcript에서 이번 턴의 usage와 모델을 읽어 `<프로젝트>/.claude/token-usage/log.jsonl`에 한 줄 추가. 이 폴더에는 `.gitignore`가 자동으로 생겨 프로젝트 git에 커밋되지 않음.
-- **분류**: 리포트할 때 아직 분류 안 된 프롬프트만 `claude -p --model sonnet`으로 작업 단위 분류. 결과는 `groups.json`에 캐시되어 다시 분류하지 않음. 잘못 묶였으면 `groups.json`에서 이름을 고치거나, 파일을 지우면 전부 재분류.
-- **비용**: API 정가 기준 추정 (`scripts/tracker.py`의 `PRICES`). cache write는 5분 TTL 1.25배 / 1시간 TTL 2배로 계산. 구독(Pro/Max) 요금과는 다르며, 작업 간 비교용.
+- **Recording**: when a reply finishes, a `Stop` hook reads the turn's usage and model from the transcript and appends one line to `<project>/.claude/token-usage/log.jsonl`. The folder gets its own `.gitignore`, so it is never committed to your project's git.
+- **Grouping**: when you run a report, only prompts not yet grouped are sent to `claude -p --model sonnet`. Results are cached in `groups.json` and never reclassified. Work-unit names follow the language of your prompts. To fix a grouping, edit the name in `groups.json`; delete the file to regroup everything.
+- **Cost**: estimated at API list prices (`PRICES` in `scripts/tracker.py`). Cache writes are priced at 1.25x input for the 5-minute TTL and 2x for the 1-hour TTL. This differs from subscription (Pro/Max) billing; use it to compare work units.
 
-환경변수: `TOKEN_TRACKER_MODEL` (분류 모델, 기본 `sonnet`), `TOKEN_TRACKER_NO_OPEN=1` (HTML 자동 열기 끔).
+Environment variables: `TOKEN_TRACKER_MODEL` (grouping model, default `sonnet`), `TOKEN_TRACKER_NO_OPEN=1` (don't open the HTML report automatically).
 
-## 한계
+## Limitations
 
-- 서브에이전트가 쓴 토큰은 포함되지 않음 (별도 transcript).
-- 업데이트 이전 기록은 모델명이 없어 비용이 "모델 미상"으로 빠짐.
+- Tokens used by subagents are not included (they live in separate transcripts).
+- Records from versions before 0.1.0 have no model, so their cost shows as "unknown model".
 
-## 분류 평가
+## Grouping eval
 
 ```
-python3 tests/eval_grouping.py 4   # 63개 예시 프롬프트를 4번 분류해 정답과 비교
+python3 tests/eval_grouping.py 4   # groups 63 sample prompts 4 times and compares with the answer key
 ```
 
-현재 sonnet 기준 4회 모두 10개 작업(정답 10개), F1 92%.
+With sonnet: 10 work units in all 4 runs (answer key: 10), average F1 93%.
