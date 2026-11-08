@@ -39,7 +39,7 @@ Work as usual; recording is automatic.
 
 ## How it works
 
-- **Recording**: when a reply finishes, a `Stop` hook reads the turn's usage and model from the transcript and appends one line to `<project>/.claude/token-usage/log.jsonl`. The folder gets its own `.gitignore`, so it is never committed to your project's git.
+- **Recording**: when a reply finishes, a `Stop` hook reads the turn's usage and model from the transcript and appends one line to `<project>/.claude/token-usage/log.jsonl` (always the project root, even when Claude works in a subfolder). The folder gets its own `.gitignore`, so it is never committed to your project's git.
 - **Grouping**: when you run a report, only prompts not yet grouped are sent to `claude -p --model sonnet`. Results are cached in `groups.json` and never reclassified. Work-unit names follow the language of your prompts. To fix a grouping, edit the name in `groups.json`; delete the file to regroup everything.
 - **Cost**: estimated at API list prices (`PRICES` in `scripts/tracker.py`). Cache writes are priced at 1.25x input for the 5-minute TTL and 2x for the 1-hour TTL. This differs from subscription (Pro/Max) billing; use it to compare work units.
 

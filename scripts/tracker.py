@@ -52,8 +52,23 @@ def cost_parts(row):
     return {k: v * mult / 1e6 for k, v in parts.items()}
 
 
+def project_root(cwd):
+    """Claude's cwd moves when it cd's into subfolders; logs must stay at the project root."""
+    root = os.environ.get("CLAUDE_PROJECT_DIR")
+    if root and os.path.isdir(root):
+        return root
+    try:
+        out = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=cwd,
+                             capture_output=True, text=True, timeout=2)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return cwd
+
+
 def data_dir(cwd):
-    d = os.path.join(cwd, ".claude", "token-usage")
+    d = os.path.join(project_root(cwd), ".claude", "token-usage")
     os.makedirs(d, exist_ok=True)
     gi = os.path.join(d, ".gitignore")
     if not os.path.exists(gi):  # keep prompt text out of the project's git
@@ -423,7 +438,7 @@ def cmd_html():
             '<th class="num hide-sm">cache write</th><th class="num hide-sm">cache read</th><th class="num">Cost</th></tr>{}</table></details>'.format(
                 color[g], e(g), a["prompts"], usd(a["cost"]), trs))
     page = HTML
-    for k, v in (("{project}", e(os.path.basename(cwd))),
+    for k, v in (("{project}", e(os.path.basename(project_root(cwd)))),
                  ("{span}", "{} ~ {}".format(rows[0]["ts"][:16].replace("T", " "), rows[-1]["ts"][:16].replace("T", " "))),
                  ("{stats}", stats), ("{mix}", mix), ("{bars}", bars), ("{legend}", legend),
                  ("{tokens}", tokens), ("{timeline}", timeline), ("{details}", "".join(details))):

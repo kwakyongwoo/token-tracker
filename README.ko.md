@@ -39,7 +39,7 @@ claude plugin update token-tracker@token-tracker
 
 ## 동작 방식
 
-- **기록**: 응답이 끝나면 `Stop` 훅이 transcript에서 이번 턴의 usage와 모델을 읽어 `<프로젝트>/.claude/token-usage/log.jsonl`에 한 줄 추가합니다. 이 폴더에는 `.gitignore`가 자동으로 생겨 프로젝트 git에 커밋되지 않습니다.
+- **기록**: 응답이 끝나면 `Stop` 훅이 transcript에서 이번 턴의 usage와 모델을 읽어 `<프로젝트>/.claude/token-usage/log.jsonl`에 한 줄 추가합니다 (Claude가 하위 폴더에서 작업해도 항상 프로젝트 루트). 이 폴더에는 `.gitignore`가 자동으로 생겨 프로젝트 git에 커밋되지 않습니다.
 - **분류**: 리포트할 때 아직 분류 안 된 프롬프트만 `claude -p --model sonnet`으로 작업 단위 분류합니다. 결과는 `groups.json`에 캐시되어 다시 분류하지 않습니다. 작업 이름은 프롬프트 언어를 따릅니다 (한국어로 쓰면 한국어 이름). 잘못 묶였으면 `groups.json`에서 이름을 고치고, 파일을 지우면 전부 재분류합니다.
 - **비용**: API 정가 기준 추정입니다 (`scripts/tracker.py`의 `PRICES`). cache write는 5분 TTL 1.25배 / 1시간 TTL 2배로 계산합니다. 구독(Pro/Max) 요금과는 다르며, 작업 간 비교용입니다.
 
