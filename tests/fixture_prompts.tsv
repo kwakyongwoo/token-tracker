@@ -1,0 +1,64 @@
+# session	branch	정답 작업	프롬프트  (시간순, 세션은 이어서 진행)
+s1	feat/auth	로그인	로그인 페이지 만들어줘. 이메일이랑 비밀번호 입력 폼으로
+s1	feat/auth	로그인	비밀번호는 8자 이상이어야 한다는 검증 넣어줘
+s1	feat/auth	로그인	ㅇㅇ 좋아
+s1	feat/auth	로그인	로그인 실패하면 빨간 에러 메시지 보여주게 해줘
+s1	feat/auth	로그인	아 그거 말고 input 아래에 작게 띄워줘
+s1	feat/auth	결제 500 에러	잠깐 급한 거. 운영에서 /api/checkout 이 500 뱉는데 로그 좀 봐줘
+s1	feat/auth	결제 500 에러	TypeError: Cannot read properties of undefined (reading 'amount') at checkout.ts:88
+s1	feat/auth	결제 500 에러	쿠폰 없는 주문일 때 그런 거 같은데 맞아?
+s1	feat/auth	결제 500 에러	고쳐줘. 옵셔널 체이닝으로
+s1	feat/auth	결제 500 에러	이 케이스 테스트도 하나 추가
+s1	feat/auth	로그인	다시 로그인으로 돌아와서, 로그인 성공하면 /dashboard로 리다이렉트
+s1	feat/auth	로그인	JWT를 httpOnly 쿠키에 저장하게 바꿔줘
+s1	feat/auth	로그인	계속
+s1	feat/auth	로그인	로그아웃 버튼도
+s2	feat/products	상품 목록 페이지네이션	상품 목록 API에 페이지네이션 추가해줘. cursor 방식으로
+s2	feat/products	상품 목록 페이지네이션	프론트에서 무한 스크롤로 붙여줘
+s2	feat/products	상품 목록 페이지네이션	스크롤 끝에서 두 번 요청 가는 버그 있어
+s2	feat/products	상품 목록 페이지네이션	IntersectionObserver 쓰는 걸로 바꿔봐
+s2	feat/products	다크모드	다크모드 토글 넣고 싶어. 헤더 오른쪽에
+s2	feat/products	다크모드	CSS 변수로 색상 정리부터 해줘
+s2	feat/products	다크모드	시스템 설정 따라가게 기본값 설정
+s2	feat/products	다크모드	새로고침하면 깜빡이는데
+s2	feat/products	다크모드	ok 됐다
+s2	feat/products	상품 목록 페이지네이션	아까 무한스크롤에서 마지막 페이지면 로딩 스피너 숨겨줘
+s2	feat/products	상품 목록 페이지네이션	빈 목록일 때 "상품이 없어요" 표시
+s3	chore/ci	CI 설정	GitHub Actions로 PR마다 테스트 돌게 해줘
+s3	chore/ci	CI 설정	node 20이랑 22 매트릭스로
+s3	chore/ci	CI 설정	pnpm 캐시 설정 추가
+s3	chore/ci	CI 설정	왜 실패하지? lockfile 어쩌구 에러남
+s3	chore/ci	CI 설정	frozen-lockfile 빼지 말고 다른 방법
+s3	chore/ci	DB 마이그레이션	users 테이블에 phone 컬럼 추가하는 마이그레이션 만들어줘
+s3	chore/ci	DB 마이그레이션	nullable로 하고 인덱스도
+s3	chore/ci	DB 마이그레이션	롤백 스크립트도 확인해줘
+s3	chore/ci	CI 설정	CI에서 마이그레이션도 돌려서 검증하게 해줘
+s3	chore/ci	CI 설정	postgres 서비스 컨테이너 띄우는 거 맞지?
+s4	perf/images	이미지 성능	메인 페이지 LCP가 4초 넘게 나와. 원인 분석해줘
+s4	perf/images	이미지 성능	히어로 이미지가 3MB네. 이거 webp로 변환하고 사이즈별로 srcset
+s4	perf/images	이미지 성능	아래쪽 이미지들은 lazy loading
+s4	perf/images	이미지 성능	다시 측정해봐
+s4	perf/images	문서	README에 로컬 개발 환경 세팅 방법 정리해줘
+s4	perf/images	문서	.env.example도 만들고 README에 링크
+s4	perf/images	문서	오타 있다 고쳐줘
+s4	perf/images	이미지 성능	CLS도 0.2 나오던데 이미지 width height 지정해줘
+s4	perf/images	주문 알림 이메일	주문 완료되면 이메일 보내는 기능 만들자. SES 써서
+s4	perf/images	주문 알림 이메일	이메일 템플릿은 mjml로
+s4	perf/images	주문 알림 이메일	큐에 넣어서 비동기로 보내게
+s5	feat/notify	주문 알림 이메일	어제 하던 주문 메일 이어서 하자. 재시도 로직 넣어줘
+s5	feat/notify	주문 알림 이메일	3번 실패하면 DLQ로
+s5	feat/notify	주문 알림 이메일	응
+s5	feat/notify	주문 알림 이메일	로컬에서 테스트할 수 있게 mailhog 연결
+s5	feat/notify	결제 UI 개선	결제 페이지 디자인 좀 손보자. 카드 입력 폼이 너무 좁아
+s5	feat/notify	결제 UI 개선	모바일에서 버튼이 화면 밖으로 나가
+s5	feat/notify	결제 UI 개선	총 금액을 sticky footer로
+s5	feat/notify	결제 UI 개선	색 좀 더 진하게
+s5	feat/notify	결제 500 에러	아 그리고 지난번 checkout 500 고친 거 운영에 또 같은 에러 떴대. 다른 경로인가 봐
+s5	feat/notify	결제 500 에러	배송비 없는 주문일 때네. 같은 방식으로 고쳐줘
+s5	feat/notify	결제 UI 개선	다시 결제 화면. 로딩 중에 버튼 비활성화
+s5	feat/notify	로그인	로그인에 구글 소셜 로그인 추가해줘
+s5	feat/notify	로그인	콜백 URL 설정 어디서 해?
+s5	feat/notify	로그인	refresh token 만료되면 자동 로그아웃
+s5	feat/notify	문서	README에 소셜 로그인 설정법 추가
+s5	feat/notify	이미지 성능	상품 상세 이미지들도 아까처럼 webp 변환 적용해줘
+s5	feat/notify	이미지 성능	ㄱㄱ
