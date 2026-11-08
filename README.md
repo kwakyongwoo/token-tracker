@@ -28,7 +28,7 @@ Claude Code 플러그인. 프롬프트마다 토큰 사용량을 기록하고, C
 
 ## 동작 방식
 
-- **기록**: `Stop` 훅이 응답이 끝날 때 transcript에서 이번 턴의 usage와 모델을 읽어 `<프로젝트>/.claude/token-usage/log.jsonl`에 한 줄 추가.
+- **기록**: `Stop` 훅이 응답이 끝날 때 transcript에서 이번 턴의 usage와 모델을 읽어 `<프로젝트>/.claude/token-usage/log.jsonl`에 한 줄 추가. 이 폴더에는 `.gitignore`가 자동으로 생겨 프로젝트 git에 커밋되지 않음.
 - **분류**: 리포트할 때 아직 분류 안 된 프롬프트만 `claude -p --model sonnet`으로 작업 단위 분류. 결과는 `groups.json`에 캐시되어 다시 분류하지 않음. 잘못 묶였으면 `groups.json`에서 이름을 고치거나, 파일을 지우면 전부 재분류.
 - **비용**: API 정가 기준 추정 (`scripts/tracker.py`의 `PRICES`). cache write는 5분 TTL 1.25배 / 1시간 TTL 2배로 계산. 구독(Pro/Max) 요금과는 다르며, 작업 간 비교용.
 

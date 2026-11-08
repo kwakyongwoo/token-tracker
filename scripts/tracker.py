@@ -54,6 +54,10 @@ def cost_parts(row):
 def data_dir(cwd):
     d = os.path.join(cwd, ".claude", "token-usage")
     os.makedirs(d, exist_ok=True)
+    gi = os.path.join(d, ".gitignore")
+    if not os.path.exists(gi):  # 프롬프트 내용이 프로젝트 git에 커밋되지 않게 폴더 전체 제외
+        with open(gi, "w") as f:
+            f.write("# token-tracker 기록 (프롬프트 내용 포함) - 커밋하지 않음\n*\n")
     return d
 
 
